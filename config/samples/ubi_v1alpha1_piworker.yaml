@@ -1,0 +1,39 @@
+apiVersion: ubi.pi.dev/v1alpha1
+kind: PiWorker
+metadata:
+  labels:
+    app.kubernetes.io/name: piworker
+    app.kubernetes.io/managed-by: kustomize
+  name: piworker-sample
+spec:
+  # LiteLLM model name routable by the proxy.
+  model: gpt-4.1
+  litellm:
+    # OpenAI-compatible LiteLLM endpoint.
+    baseURL: http://litellm-proxy.default.svc.cluster.local:4000/v1
+    # Secret must contain a key named `api-key` with the LiteLLM API key.
+    apiKeySecretRef:
+      name: litellm-credentials
+      key: api-key
+  auth:
+    # Secret must contain a key named `token` with a high-entropy bearer token clients
+    # present as `Authorization: Bearer <token>` to the public wss endpoint.
+    bearerTokenSecretRef:
+      name: piworker-client-token
+      key: token
+    allowedOrigins:
+      - https://console.example.com
+  ingress:
+    className: nginx
+    # TLS Secret covering *.<manager --ingress-domain>. Optional if TLS is terminated
+    # elsewhere or the manager default is used.
+    tlsSecretName: wildcard-agents-tls
+  # workspace is ephemeral (emptyDir) by default. To persist, set:
+  # workspace:
+  #   persistentVolumeClaimName: piworker-sample-workspace
+  # workerImage / workerImagePullSecret override the manager --worker-image /
+  # --worker-image-pull-secret defaults. Setting workerImage lets a PiWorker author run an
+  # arbitrary image in the agent Pod, so the namespace must be trusted. Leave unset to use the
+  # operator-configured worker image.
+  # workerImage: ghcr.io/hyperaiops/piworker-worker:v0.0.1
+  # workerImagePullSecret: ghcr-pull-secret

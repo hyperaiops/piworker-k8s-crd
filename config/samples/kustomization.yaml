@@ -1,0 +1,4 @@
+## Append samples of your project ##
+resources:
+- ubi_v1alpha1_piworker.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples
