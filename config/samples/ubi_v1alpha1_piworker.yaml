@@ -11,7 +11,10 @@ spec:
   litellm:
     # OpenAI-compatible LiteLLM endpoint.
     baseURL: https://llm.ubichat.ubisoft.org
-    # Secret must contain a key named `api-key` with the LiteLLM API key.
+    # apiKeySecretRef references a user-created Secret/key holding the LiteLLM API key.
+    # The name and key are YOUR choice — create the Secret first, then reference it here.
+    # The controller never reads the value; kubelet projects it into the pod as a file.
+    #   kubectl create secret generic <name> --from-literal=<key>=sk-litellm-...
     apiKeySecretRef:
       name: litellm-credentials
       key: api-key
