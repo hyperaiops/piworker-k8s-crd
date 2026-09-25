@@ -96,7 +96,7 @@ func (r *PiWorkerReconciler) desiredDeployment(piworker *ubiv1alpha1.PiWorker, n
 					"--model=" + piworker.Spec.Model,
 					"--litellm-base-url=" + piworker.Spec.LiteLLM.BaseURL,
 					"--api-key-path=/secrets/litellm/" + piworker.Spec.LiteLLM.APIKeySecretRef.Key,
-					"--token-path=/secrets/client/" + piworker.Spec.Auth.BearerTokenSecretRef.Key,
+					"--token-path=/secrets/client/" + bearerTokenKey,
 					"--workspace-dir=/workspace",
 					"--home-dir=/home/pi",
 				},
@@ -266,12 +266,29 @@ func clientSecretVolume(piworker *ubiv1alpha1.PiWorker) corev1.Volume {
 		Name: "client-secret",
 		VolumeSource: corev1.VolumeSource{
 			Secret: &corev1.SecretVolumeSource{
-				SecretName: piworker.Spec.Auth.BearerTokenSecretRef.Name,
+				SecretName: piworker.Status.BearerTokenSecretRef.Name,
 				Items: []corev1.KeyToPath{{
-					Key:  piworker.Spec.Auth.BearerTokenSecretRef.Key,
-					Path: piworker.Spec.Auth.BearerTokenSecretRef.Key,
+					Key:  bearerTokenKey,
+					Path: bearerTokenKey,
 				}},
 			},
+		},
+	}
+}
+
+// desiredTokenSecret builds the controller-owned Secret holding the auto-generated client
+// bearer token. The token value is generated once and persisted; on subsequent reconciles
+// the existing Secret data is preserved (the controller never overwrites an existing token).
+func (r *PiWorkerReconciler) desiredTokenSecret(piworker *ubiv1alpha1.PiWorker, n names, token string) *corev1.Secret {
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      n.tokenSecret,
+			Namespace: piworker.Namespace,
+			Labels:    labels(piworker),
+		},
+		Type: corev1.SecretTypeOpaque,
+		StringData: map[string]string{
+			bearerTokenKey: token,
 		},
 	}
 }

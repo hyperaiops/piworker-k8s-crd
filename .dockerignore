@@ -17,5 +17,6 @@
 !internal/bridge/pi-extension/litellm/index.ts
 !internal/bridge/pi-extension/litellm/package.json
 
-# Re-include the prebuilt Go bridge binary copied into the worker image.
+# Re-include the prebuilt Go binaries copied into the worker/controller images.
 !bin/bridge
+!bin/manager

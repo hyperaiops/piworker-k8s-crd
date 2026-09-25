@@ -47,14 +47,16 @@ func newTestPiWorker(name, uid string) *ubiv1alpha1.PiWorker {
 				},
 			},
 			Auth: ubiv1alpha1.PiAuthSpec{
-				BearerTokenSecretRef: ubiv1alpha1.SecretKeySelector{
-					Name: "client-token", Key: "token",
-				},
 				AllowedOrigins: []string{"https://console.example.com"},
 			},
 			Ingress: ubiv1alpha1.IngressSpec{
 				ClassName:     ptr("nginx"),
 				TLSSecretName: "wildcard-tls",
+			},
+		},
+		Status: ubiv1alpha1.PiWorkerStatus{
+			BearerTokenSecretRef: ubiv1alpha1.SecretKeySelector{
+				Name: "pw-my-agent-abc12345-token", Key: "token",
 			},
 		},
 	}

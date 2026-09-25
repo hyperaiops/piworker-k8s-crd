@@ -75,10 +75,7 @@ var _ = Describe("PiWorker Controller", func() {
 							},
 						},
 						Auth: ubiv1alpha1.PiAuthSpec{
-							BearerTokenSecretRef: ubiv1alpha1.SecretKeySelector{
-								Name: "client-token",
-								Key:  "token",
-							},
+							AllowedOrigins: []string{"https://console.example.com"},
 						},
 						Ingress: ubiv1alpha1.IngressSpec{
 							TLSSecretName: testTLSSecret,
@@ -125,6 +122,17 @@ var _ = Describe("PiWorker Controller", func() {
 			Expect(piworker.Status.WorkloadName).NotTo(BeEmpty())
 			Expect(piworker.Status.ServiceName).NotTo(BeEmpty())
 			Expect(piworker.Status.IngressName).NotTo(BeEmpty())
+
+			By("verifying the controller auto-generated a bearer token Secret and recorded its ref")
+			Expect(piworker.Status.BearerTokenSecretRef.Name).NotTo(BeEmpty())
+			Expect(piworker.Status.BearerTokenSecretRef.Key).To(Equal("token"))
+			tokenSecret := &corev1.Secret{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name:      piworker.Status.BearerTokenSecretRef.Name,
+				Namespace: resourceNamespace,
+			}, tokenSecret)).To(Succeed())
+			Expect(tokenSecret.Data).To(HaveKey("token"))
+			Expect(len(tokenSecret.Data["token"])).To(BeNumerically(">", 0))
 
 			By("verifying the Deployment was created with the controlled worker image")
 			dep := &appsv1.Deployment{}

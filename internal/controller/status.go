@@ -24,11 +24,16 @@ import (
 	ubiv1alpha1 "github.com/yfxue/pi-agent-operator/api/v1alpha1"
 )
 
-// setCondition upserts a condition on the PiWorker status.
+// setCondition upserts a condition on the PiWorker status. Reason and Message are always
+// populated because the Kubernetes API rejects conditions with an empty reason.
 func setCondition(piworker *ubiv1alpha1.PiWorker, condType string, status bool) {
 	condStatus := metav1.ConditionFalse
+	reason := "False"
+	message := "Condition is false"
 	if status {
 		condStatus = metav1.ConditionTrue
+		reason = "True"
+		message = "Condition is true"
 	}
 	for i, c := range piworker.Status.Conditions {
 		if c.Type == condType {
@@ -36,6 +41,8 @@ func setCondition(piworker *ubiv1alpha1.PiWorker, condType string, status bool) 
 				return
 			}
 			piworker.Status.Conditions[i].Status = condStatus
+			piworker.Status.Conditions[i].Reason = reason
+			piworker.Status.Conditions[i].Message = message
 			piworker.Status.Conditions[i].LastTransitionTime = metav1.NewTime(time.Now())
 			piworker.Status.Conditions[i].ObservedGeneration = piworker.Generation
 			return
@@ -44,6 +51,8 @@ func setCondition(piworker *ubiv1alpha1.PiWorker, condType string, status bool) 
 	piworker.Status.Conditions = append(piworker.Status.Conditions, metav1.Condition{
 		Type:               condType,
 		Status:             condStatus,
+		Reason:             reason,
+		Message:            message,
 		LastTransitionTime: metav1.NewTime(time.Now()),
 		ObservedGeneration: piworker.Generation,
 	})

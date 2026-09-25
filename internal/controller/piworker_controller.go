@@ -47,6 +47,7 @@ type PiWorkerReconciler struct {
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 // Reconcile moves the cluster toward the desired state for a single PiWorker: it generates
@@ -89,6 +90,13 @@ func (r *PiWorkerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	piworker.Status.IngressName = n.ingress
 	piworker.Status.Endpoint = endpointScheme(piworker, r.Config.TLSSecretName) + "://" + piworker.Status.Host + rpcPath
 
+	// Reconcile the auto-generated client bearer token Secret before the Deployment, which
+	// mounts it. The token is generated once and preserved across reconciles; the controller
+	// never overwrites an existing Secret's data.
+	if err := r.reconcileTokenSecret(ctx, piworker, n); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	var requeue error
 
 	if err := r.reconcileDeployment(ctx, piworker, n); err != nil {
@@ -102,11 +110,15 @@ func (r *PiWorkerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// Compute and persist status conditions.
-	if err := r.updateStatus(ctx, piworker, requeue); err != nil && requeue == nil {
-		requeue = err
+	if err := r.updateStatus(ctx, piworker, requeue); err != nil {
+		logger.Error(err, "failed to update status")
+		if requeue == nil {
+			requeue = err
+		}
 	}
 
 	if requeue != nil {
+		logger.V(1).Info("reconcile completed with requeue", "err", requeue)
 		return ctrl.Result{Requeue: true}, nil
 	}
 	return ctrl.Result{}, nil
@@ -136,6 +148,46 @@ func (r *PiWorkerReconciler) reconcileIngress(ctx context.Context, piworker *ubi
 	return r.createOrUpdate(ctx, ing, &networkingv1.Ingress{})
 }
 
+// reconcileTokenSecret ensures a controller-owned Secret holding the auto-generated client
+// bearer token exists. On first reconcile it generates a token, creates the Secret, sets an
+// owner reference, and records the Secret name/key in status so kubectl can retrieve the
+// token. On later reconciles the existing Secret data is preserved — the token is generated
+// once per PiWorker and never rotated or overwritten by the controller. The token value is
+// never logged or placed in status.
+func (r *PiWorkerReconciler) reconcileTokenSecret(ctx context.Context, piworker *ubiv1alpha1.PiWorker, n names) error {
+	// Already reconciled: just ensure the Secret still exists.
+	if piworker.Status.BearerTokenSecretRef.Name != "" {
+		existing := &corev1.Secret{}
+		if err := r.Get(ctx, client.ObjectKey{Namespace: piworker.Namespace, Name: piworker.Status.BearerTokenSecretRef.Name}, existing); err != nil {
+			if apierrors.IsNotFound(err) {
+				// Fall through to recreate with a fresh token.
+			} else {
+				return err
+			}
+		} else {
+			return nil
+		}
+	}
+
+	token, err := generateBearerToken()
+	if err != nil {
+		return err
+	}
+	sec := r.desiredTokenSecret(piworker, n, token)
+	if err := controllerutil.SetControllerReference(piworker, sec, r.Scheme); err != nil {
+		return err
+	}
+	if err := r.Create(ctx, sec); err != nil && !apierrors.IsAlreadyExists(err) {
+		return err
+	}
+
+	piworker.Status.BearerTokenSecretRef = ubiv1alpha1.SecretKeySelector{
+		Name: n.tokenSecret,
+		Key:  bearerTokenKey,
+	}
+	return r.Status().Update(ctx, piworker)
+}
+
 // createOrUpdate creates the object if absent or updates mutable fields to match the desired
 // object. It relies on controller-runtime's semantic equality via the provided zero-valued
 // existing object type for server-side apply-free mutation.
@@ -149,6 +201,12 @@ func (r *PiWorkerReconciler) createOrUpdate(ctx context.Context, desired client.
 	}
 	// Preserve the runtime object's GVK and metadata uid/resourceVersion; patch the spec.
 	patchBase := existing.DeepCopyObject().(client.Object)
+	// Ensure the desired object carries its GVK so controller-runtime can build the patch
+	// URL; objects constructed by the builders may lack APIVersion/Kind until the scheme
+	// injects them, and a missing GVK surfaces as "name must be provided" patch errors.
+	if gvk := existing.GetObjectKind().GroupVersionKind(); gvk.Kind != "" {
+		desired.GetObjectKind().SetGroupVersionKind(gvk)
+	}
 	desired.SetResourceVersion(existing.GetResourceVersion())
 	desired.SetUID(existing.GetUID())
 	desired.SetGeneration(existing.GetGeneration())
@@ -212,6 +270,7 @@ func (r *PiWorkerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
 		Owns(&networkingv1.Ingress{}).
+		Owns(&corev1.Secret{}).
 		Named("piworker").
 		Complete(r)
 }

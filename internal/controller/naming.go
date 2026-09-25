@@ -41,13 +41,17 @@ const (
 	bridgePortName = "rpc"
 	// rpcPath is the WebSocket path exposed through the Ingress.
 	rpcPath = "/v1/rpc"
+
+	// bearerTokenKey is the Secret data key holding the auto-generated client bearer token.
+	bearerTokenKey = "token"
 )
 
 // names holds the deterministic names for a PiWorker's child resources.
 type names struct {
-	deployment string
-	service    string
-	ingress    string
+	deployment  string
+	service     string
+	ingress     string
+	tokenSecret string
 }
 
 // resourceNames derives DNS-1123-safe names from the PiWorker name and UID. A short UID
@@ -57,14 +61,16 @@ func resourceNames(piworker *ubiv1alpha1.PiWorker) names {
 	base := sanitizeDNS(piworker.Name)
 	suffix := shortHash(string(piworker.UID))
 	n := names{
-		deployment: "pw-" + base + "-" + suffix,
-		service:    "pw-" + base + "-" + suffix,
-		ingress:    "pw-" + base + "-" + suffix,
+		deployment:  "pw-" + base + "-" + suffix,
+		service:     "pw-" + base + "-" + suffix,
+		ingress:     "pw-" + base + "-" + suffix,
+		tokenSecret: "pw-" + base + "-" + suffix + "-token",
 	}
 	// Keep each well under the 253-char DNS label limit.
 	n.deployment = trunc(n.deployment, 63)
 	n.service = trunc(n.service, 63)
 	n.ingress = trunc(n.ingress, 253)
+	n.tokenSecret = trunc(n.tokenSecret, 253)
 	return n
 }
 
@@ -96,6 +102,16 @@ func generateHost(domain string) (string, error) {
 	}
 	enc := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b)
 	return "pw-" + strings.ToLower(enc) + "." + domain, nil
+}
+
+// generateBearerToken returns 32 bytes of cryptographic randomness as a hex string, used as
+// the client bearer token stored in the controller-owned Secret.
+func generateBearerToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // shortHash returns the first 8 hex chars of the SHA-256 of s, enough to disambiguate

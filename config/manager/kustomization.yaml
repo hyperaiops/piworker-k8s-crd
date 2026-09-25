@@ -5,4 +5,4 @@ kind: Kustomization
 images:
 - name: controller
   newName: ghcr.io/hyperaiops/piworker
-  newTag: v0.0.1
+  newTag: v0.0.5
