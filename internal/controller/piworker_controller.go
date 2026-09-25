@@ -66,6 +66,15 @@ func (r *PiWorkerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	n := resourceNames(piworker)
 
+	// Reconcile the auto-generated client bearer token Secret FIRST. The CRD marks
+	// status.bearerTokenSecretRef as required (minLength 1), so any Status().Update
+	// that carries an empty bearerTokenSecretRef is rejected by the API server and
+	// the reconciler loops forever. Generating the token secret before writing
+	// status guarantees bearerTokenSecretRef is populated on the first status write.
+	if err := r.reconcileTokenSecret(ctx, piworker, n); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	// Generate the random host once and persist it before building the Ingress so it is
 	// stable across reconciles.
 	if piworker.Status.Host == "" {
@@ -89,13 +98,6 @@ func (r *PiWorkerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	piworker.Status.ServiceName = n.service
 	piworker.Status.IngressName = n.ingress
 	piworker.Status.Endpoint = endpointScheme(piworker, r.Config.TLSSecretName) + "://" + piworker.Status.Host + rpcPath
-
-	// Reconcile the auto-generated client bearer token Secret before the Deployment, which
-	// mounts it. The token is generated once and preserved across reconciles; the controller
-	// never overwrites an existing Secret's data.
-	if err := r.reconcileTokenSecret(ctx, piworker, n); err != nil {
-		return ctrl.Result{}, err
-	}
 
 	var requeue error
 
