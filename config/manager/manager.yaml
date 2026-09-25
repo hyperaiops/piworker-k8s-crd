@@ -69,14 +69,14 @@ spec:
           - --ingress-tls-secret=$(INGRESS_TLS_SECRET)
         env:
         - name: WORKER_IMAGE
-          value: ghcr.io/hyperaiops/piworker-worker:v0.0.1
+          value: ghcr.io/hyperaiops/piworker-worker:v0.0.2
         - name: WORKER_IMAGE_PULL_SECRET
           value: ghcr-pull-secret
         - name: INGRESS_DOMAIN
           value: agents.example.com
         - name: INGRESS_TLS_SECRET
           value: ""
-        image: controller:latest
+        image: ghcr.io/hyperaiops/piworker:v0.0.6
         name: manager
         ports:
         - containerPort: 8081
