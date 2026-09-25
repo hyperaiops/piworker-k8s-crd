@@ -299,14 +299,21 @@ func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
 // The token file is re-read on every connection so Secret rotation takes effect for new
 // sessions without a rollout.
 func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) bool {
-	header := r.Header.Get("Authorization")
-	const prefix = "Bearer "
-	if !strings.HasPrefix(header, prefix) {
-		w.Header().Set("WWW-Authenticate", "Bearer")
-		http.Error(w, "authorization required", http.StatusUnauthorized)
-		return false
+	// Prefer the Authorization header; fall back to a ?token= query parameter so
+	// browser WebSocket clients — which cannot set arbitrary headers — can
+	// authenticate. The query form is only acceptable because the bridge binds
+	// 127.0.0.1 and the token is per-instance (short-lived, single workspace).
+	presented := strings.TrimSpace(r.URL.Query().Get("token"))
+	if presented == "" {
+		header := r.Header.Get("Authorization")
+		const prefix = "Bearer "
+		if !strings.HasPrefix(header, prefix) {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, "authorization required", http.StatusUnauthorized)
+			return false
+		}
+		presented = strings.TrimSpace(header[len(prefix):])
 	}
-	presented := strings.TrimSpace(header[len(prefix):])
 	expected, err := os.ReadFile(s.cfg.TokenPath)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {

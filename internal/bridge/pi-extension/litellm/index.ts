@@ -16,7 +16,7 @@
 // See https://pi.dev/docs/latest/custom-provider for the provider registration API.
 
 import { readFileSync } from "node:fs";
-import { createProvider, openAICompletionsApi } from "@earendil-works/pi-ai";
+import { createProvider, lazyApi } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export default function (pi: ExtensionAPI) {
@@ -75,7 +75,12 @@ export default function (pi: ExtensionAPI) {
           maxTokens: 16384,
         },
       ],
-      api: openAICompletionsApi(),
+      // pi-ai 0.85.x removed the `openAICompletionsApi()` factory in favor of lazy-loaded
+      // API modules. The OpenAI-completions implementation module exports `stream` and
+      // `streamSimple`, which is exactly the `ProviderStreams` shape `createProvider` expects.
+      // `lazyApi` defers the dynamic import until the first model call, so a load failure
+      // surfaces as a stream error rather than failing the whole extension at startup.
+      api: lazyApi(() => import("@earendil-works/pi-ai/api/openai-completions")),
     }),
   );
 }

@@ -34,5 +34,5 @@ spec:
   # --worker-image-pull-secret defaults. Setting workerImage lets a PiWorker author run an
   # arbitrary image in the agent Pod, so the namespace must be trusted. Leave unset to use the
   # operator-configured worker image.
-  workerImage: ghcr.io/hyperaiops/piworker-worker:v0.0.1
+  workerImage: ghcr.io/hyperaiops/piworker-worker:v0.0.2
   workerImagePullSecret: ghcr-pull-secret
