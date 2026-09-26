@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -72,6 +73,13 @@ func (r *PiWorkerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// the reconciler loops forever. Generating the token secret before writing
 	// status guarantees bearerTokenSecretRef is populated on the first status write.
 	if err := r.reconcileTokenSecret(ctx, piworker, n); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// Reconcile the LiteLLM API-key Secret from spec.litellm.apiKey. The key value is
+	// provided by the client in the CR; the controller projects it into the worker Pod
+	// from this controller-owned Secret, which is garbage-collected with the PiWorker.
+	if err := r.reconcileLiteLLMSecret(ctx, piworker, n); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -190,6 +198,18 @@ func (r *PiWorkerReconciler) reconcileTokenSecret(ctx context.Context, piworker 
 	return r.Status().Update(ctx, piworker)
 }
 
+// reconcileLiteLLMSecret ensures a controller-owned Secret holding the LiteLLM API key
+// exists. The key value comes from spec.litellm.apiKey (provided by the client at CR
+// creation); the controller projects it into the worker Pod from this Secret, which is
+// garbage-collected with the PiWorker via its owner reference.
+func (r *PiWorkerReconciler) reconcileLiteLLMSecret(ctx context.Context, piworker *ubiv1alpha1.PiWorker, n names) error {
+	sec := r.desiredLiteLLMSecret(piworker, n)
+	if err := controllerutil.SetControllerReference(piworker, sec, r.Scheme); err != nil {
+		return err
+	}
+	return r.createOrUpdate(ctx, sec, &corev1.Secret{})
+}
+
 // createOrUpdate creates the object if absent or updates mutable fields to match the desired
 // object. It relies on controller-runtime's semantic equality via the provided zero-valued
 // existing object type for server-side apply-free mutation.
@@ -229,10 +249,33 @@ func (r *PiWorkerReconciler) createOrUpdate(ctx context.Context, desired client.
 	return nil
 }
 
-// specEqual is a shallow comparison placeholder; the merge patch below handles drift safely
-// because the desired object is fully specified by the controller.
+// specEqual reports whether the controller-managed spec of a and b match, so the
+// reconciler can skip patching when there is no drift. This is required because an empty
+// MergeFrom PATCH still bumps the object's generation, which (since the controller Owns
+// the resource) re-triggers a reconcile and loops ~10×/sec, racing the Deployment
+// controller and stalling status.observedGeneration. The desired objects set all
+// API-server-defaulted fields explicitly (see resources.go), so a plain DeepEqual of
+// the spec converges; labels are compared separately since createOrUpdate merges them.
 func specEqual(a, b client.Object) bool {
-	return false
+	if !reflect.DeepEqual(a.GetLabels(), b.GetLabels()) {
+		return false
+	}
+	switch ca := a.(type) {
+	case *appsv1.Deployment:
+		cb, ok := b.(*appsv1.Deployment)
+		return ok && reflect.DeepEqual(ca.Spec, cb.Spec)
+	case *corev1.Service:
+		cb, ok := b.(*corev1.Service)
+		return ok && reflect.DeepEqual(ca.Spec, cb.Spec)
+	case *networkingv1.Ingress:
+		cb, ok := b.(*networkingv1.Ingress)
+		return ok && reflect.DeepEqual(ca.Spec, cb.Spec)
+	case *corev1.Secret:
+		cb, ok := b.(*corev1.Secret)
+		return ok && reflect.DeepEqual(ca.StringData, cb.StringData) && reflect.DeepEqual(ca.Data, cb.Data)
+	default:
+		return false
+	}
 }
 
 // updateStatus derives conditions from the owned Deployment and Ingress and writes status.

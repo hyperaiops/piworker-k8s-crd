@@ -76,7 +76,7 @@ spec:
           value: agents.example.com
         - name: INGRESS_TLS_SECRET
           value: ""
-        image: ghcr.io/hyperaiops/piworker:v0.0.6
+        image: ghcr.io/hyperaiops/piworker-controller:v0.0.11
         name: manager
         ports:
         - containerPort: 8081

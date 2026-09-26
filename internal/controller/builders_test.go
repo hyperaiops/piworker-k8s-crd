@@ -42,9 +42,7 @@ func newTestPiWorker(name, uid string) *ubiv1alpha1.PiWorker {
 			Model: "gpt-4.1",
 			LiteLLM: ubiv1alpha1.LiteLLMSpec{
 				BaseURL: "http://litellm-proxy:4000/v1",
-				APIKeySecretRef: ubiv1alpha1.SecretKeySelector{
-					Name: "litellm-creds", Key: "api-key",
-				},
+				APIKey:  "sk-test-litellm-key",
 			},
 			Auth: ubiv1alpha1.PiAuthSpec{
 				AllowedOrigins: []string{"https://console.example.com"},

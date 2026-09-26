@@ -59,7 +59,7 @@ func (r *PiWorkerReconciler) desiredDeployment(piworker *ubiv1alpha1.PiWorker, n
 		workerImagePullSecret = r.Config.WorkerImagePullSecret
 	}
 
-	volumes, mounts := workerVolumes(piworker)
+	volumes, mounts := workerVolumes(piworker, n)
 
 	resources := piworker.Spec.Resources
 	if resources.Requests == nil {
@@ -72,10 +72,25 @@ func (r *PiWorkerReconciler) desiredDeployment(piworker *ubiv1alpha1.PiWorker, n
 	strategy := appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}
 	if piworker.Spec.Workspace.PersistentVolumeClaimName == "" {
 		strategy.Type = appsv1.RollingUpdateDeploymentStrategyType
+		// Match the API-server defaults so the desired spec equals the live one and the
+		// reconciler's merge patch is empty when there is no drift; otherwise the patch is
+		// non-empty every reconcile, racing the Deployment controller and stalling
+		// status.observedGeneration (Available never flips).
+		twofive := intstr.FromString("25%")
+		strategy.RollingUpdate = &appsv1.RollingUpdateDeployment{
+			MaxUnavailable: &twofive,
+			MaxSurge:       &twofive,
+		}
 	}
 
 	podSpec := corev1.PodSpec{
 		AutomountServiceAccountToken: ptr(false),
+		// Set the API-server defaults explicitly so the desired spec equals the live one
+		// and the reconciler's merge patch is empty when there is no drift.
+		RestartPolicy:                 corev1.RestartPolicyAlways,
+		TerminationGracePeriodSeconds: ptr(int64(30)),
+		DNSPolicy:                     corev1.DNSClusterFirst,
+		SchedulerName:                 "default-scheduler",
 		SecurityContext: &corev1.PodSecurityContext{
 			RunAsNonRoot: ptr(true),
 			RunAsUser:    ptr(int64(10001)),
@@ -90,12 +105,16 @@ func (r *PiWorkerReconciler) desiredDeployment(piworker *ubiv1alpha1.PiWorker, n
 			{
 				Name:  "bridge",
 				Image: workerImage,
+				// Match the API-server defaults so the desired spec equals the live one.
+				ImagePullPolicy:          corev1.PullIfNotPresent,
+				TerminationMessagePath:   "/dev/termination-log",
+				TerminationMessagePolicy: corev1.TerminationMessageReadFile,
 				Args: []string{
 					"--addr=:" + itoa(bridgePort),
 					"--pi-binary=pi",
 					"--model=" + piworker.Spec.Model,
 					"--litellm-base-url=" + piworker.Spec.LiteLLM.BaseURL,
-					"--api-key-path=/secrets/litellm/" + piworker.Spec.LiteLLM.APIKeySecretRef.Key,
+					"--api-key-path=/secrets/litellm/" + litellmAPIKeyKey,
 					"--token-path=/secrets/client/" + bearerTokenKey,
 					"--workspace-dir=/workspace",
 					"--home-dir=/home/pi",
@@ -142,6 +161,8 @@ func (r *PiWorkerReconciler) desiredDeployment(piworker *ubiv1alpha1.PiWorker, n
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec:       podSpec,
 			},
+			RevisionHistoryLimit:    ptr(int32(10)),
+			ProgressDeadlineSeconds: ptr(int32(600)),
 		},
 	}
 }
@@ -214,12 +235,12 @@ func (r *PiWorkerReconciler) desiredIngress(piworker *ubiv1alpha1.PiWorker, n na
 	return ing
 }
 
-func workerVolumes(piworker *ubiv1alpha1.PiWorker) ([]corev1.Volume, []corev1.VolumeMount) {
+func workerVolumes(piworker *ubiv1alpha1.PiWorker, n names) ([]corev1.Volume, []corev1.VolumeMount) {
 	volumes := []corev1.Volume{
 		workspaceVolume(piworker),
 		{Name: "pi-home", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 		{Name: "tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
-		litellmSecretVolume(piworker),
+		litellmSecretVolume(n),
 		clientSecretVolume(piworker),
 	}
 	mounts := []corev1.VolumeMount{
@@ -246,15 +267,20 @@ func workspaceVolume(piworker *ubiv1alpha1.PiWorker) corev1.Volume {
 	return corev1.Volume{Name: "workspace", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}
 }
 
-func litellmSecretVolume(piworker *ubiv1alpha1.PiWorker) corev1.Volume {
+func litellmSecretVolume(n names) corev1.Volume {
 	return corev1.Volume{
 		Name: "litellm-secret",
 		VolumeSource: corev1.VolumeSource{
 			Secret: &corev1.SecretVolumeSource{
-				SecretName: piworker.Spec.LiteLLM.APIKeySecretRef.Name,
+				SecretName: n.litellmSecret,
+				// DefaultMode matches the API-server default (0644) so the desired spec
+				// equals the live one and the reconciler's merge patch is empty when there
+				// is no drift. Leaving it nil makes the patch non-empty every reconcile,
+				// which races the Deployment controller and stalls status.observedGeneration.
+				DefaultMode: ptr(int32(0644)),
 				Items: []corev1.KeyToPath{{
-					Key:  piworker.Spec.LiteLLM.APIKeySecretRef.Key,
-					Path: piworker.Spec.LiteLLM.APIKeySecretRef.Key,
+					Key:  litellmAPIKeyKey,
+					Path: litellmAPIKeyKey,
 				}},
 			},
 		},
@@ -266,7 +292,8 @@ func clientSecretVolume(piworker *ubiv1alpha1.PiWorker) corev1.Volume {
 		Name: "client-secret",
 		VolumeSource: corev1.VolumeSource{
 			Secret: &corev1.SecretVolumeSource{
-				SecretName: piworker.Status.BearerTokenSecretRef.Name,
+				SecretName:  piworker.Status.BearerTokenSecretRef.Name,
+				DefaultMode: ptr(int32(0644)),
 				Items: []corev1.KeyToPath{{
 					Key:  bearerTokenKey,
 					Path: bearerTokenKey,
@@ -293,6 +320,24 @@ func (r *PiWorkerReconciler) desiredTokenSecret(piworker *ubiv1alpha1.PiWorker, 
 	}
 }
 
+// desiredLiteLLMSecret builds the controller-owned Secret holding the LiteLLM API key. The
+// key value comes from spec.litellm.apiKey (provided by the client at CR creation); the
+// controller projects it into the worker Pod from this Secret. Because the Secret is owned
+// by the PiWorker, it is garbage-collected when the CR is deleted.
+func (r *PiWorkerReconciler) desiredLiteLLMSecret(piworker *ubiv1alpha1.PiWorker, n names) *corev1.Secret {
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      n.litellmSecret,
+			Namespace: piworker.Namespace,
+			Labels:    labels(piworker),
+		},
+		Type: corev1.SecretTypeOpaque,
+		StringData: map[string]string{
+			litellmAPIKeyKey: piworker.Spec.LiteLLM.APIKey,
+		},
+	}
+}
+
 func selectorLabels(piworker *ubiv1alpha1.PiWorker) map[string]string {
 	return map[string]string{
 		labelKeyWorkerUID: string(piworker.UID),
@@ -303,12 +348,16 @@ func probe(path string) *corev1.Probe {
 	return &corev1.Probe{
 		ProbeHandler: corev1.ProbeHandler{
 			HTTPGet: &corev1.HTTPGetAction{
-				Path: path,
-				Port: intstr.FromString(bridgePortName),
+				Path:   path,
+				Port:   intstr.FromString(bridgePortName),
+				Scheme: corev1.URISchemeHTTP,
 			},
 		},
 		InitialDelaySeconds: 5,
 		PeriodSeconds:       10,
+		TimeoutSeconds:      1,
+		SuccessThreshold:    1,
+		FailureThreshold:    3,
 	}
 }
 

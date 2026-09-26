@@ -85,25 +85,16 @@ spec:
                 description: litellm configures the OpenAI-compatible LiteLLM endpoint
                   and credentials.
                 properties:
-                  apiKeySecretRef:
-                    description: apiKeySecretRef references a same-namespace Secret/key
-                      holding the LiteLLM API key.
-                    properties:
-                      key:
-                        description: key inside the Secret that holds the credential
-                          value.
-                        maxLength: 253
-                        minLength: 1
-                        type: string
-                      name:
-                        description: name of the Secret holding the credential.
-                        maxLength: 253
-                        minLength: 1
-                        type: string
-                    required:
-                    - key
-                    - name
-                    type: object
+                  apiKey:
+                    description: |-
+                      apiKey is the LiteLLM API key value (e.g. sk-litellm-...). The controller projects it
+                      into the worker Pod via a controller-owned Secret that is deleted with this PiWorker.
+                      The value is never placed in the Pod env or argv — only the mounted file is read at
+                      request time. Note the key is stored in the PiWorker spec and is therefore visible to
+                      anyone who can read PiWorker objects.
+                    maxLength: 4096
+                    minLength: 1
+                    type: string
                   baseURL:
                     description: baseURL is the OpenAI-compatible LiteLLM endpoint,
                       e.g. http://litellm-proxy:4000/v1.
@@ -111,7 +102,7 @@ spec:
                     minLength: 1
                     type: string
                 required:
-                - apiKeySecretRef
+                - apiKey
                 - baseURL
                 type: object
               model:

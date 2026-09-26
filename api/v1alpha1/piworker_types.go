@@ -42,8 +42,8 @@ type SecretKeySelector struct {
 }
 
 // LiteLLMSpec configures the OpenAI-compatible LiteLLM proxy the Pi agent routes model
-// traffic through. The API key is projected from a Secret as a file and never read by the
-// controller.
+// traffic through. The API key is provided inline and projected into the worker Pod from a
+// controller-owned Secret that is garbage-collected with this PiWorker.
 type LiteLLMSpec struct {
 	// baseURL is the OpenAI-compatible LiteLLM endpoint, e.g. http://litellm-proxy:4000/v1.
 	// +kubebuilder:validation:Required
@@ -51,9 +51,15 @@ type LiteLLMSpec struct {
 	// +kubebuilder:validation:MaxLength=2048
 	BaseURL string `json:"baseURL"`
 
-	// apiKeySecretRef references a same-namespace Secret/key holding the LiteLLM API key.
+	// apiKey is the LiteLLM API key value (e.g. sk-litellm-...). The controller projects it
+	// into the worker Pod via a controller-owned Secret that is deleted with this PiWorker.
+	// The value is never placed in the Pod env or argv — only the mounted file is read at
+	// request time. Note the key is stored in the PiWorker spec and is therefore visible to
+	// anyone who can read PiWorker objects.
 	// +kubebuilder:validation:Required
-	APIKeySecretRef SecretKeySelector `json:"apiKeySecretRef"`
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=4096
+	APIKey string `json:"apiKey"`
 }
 
 // PiAuthSpec configures client authentication to the bridge's public WebSocket endpoint.

@@ -44,14 +44,17 @@ const (
 
 	// bearerTokenKey is the Secret data key holding the auto-generated client bearer token.
 	bearerTokenKey = "token"
+	// litellmAPIKeyKey is the Secret data key holding the LiteLLM API key.
+	litellmAPIKeyKey = "api-key"
 )
 
 // names holds the deterministic names for a PiWorker's child resources.
 type names struct {
-	deployment  string
-	service     string
-	ingress     string
-	tokenSecret string
+	deployment    string
+	service       string
+	ingress       string
+	tokenSecret   string
+	litellmSecret string
 }
 
 // resourceNames derives DNS-1123-safe names from the PiWorker name and UID. A short UID
@@ -61,16 +64,18 @@ func resourceNames(piworker *ubiv1alpha1.PiWorker) names {
 	base := sanitizeDNS(piworker.Name)
 	suffix := shortHash(string(piworker.UID))
 	n := names{
-		deployment:  "pw-" + base + "-" + suffix,
-		service:     "pw-" + base + "-" + suffix,
-		ingress:     "pw-" + base + "-" + suffix,
-		tokenSecret: "pw-" + base + "-" + suffix + "-token",
+		deployment:    "pw-" + base + "-" + suffix,
+		service:       "pw-" + base + "-" + suffix,
+		ingress:       "pw-" + base + "-" + suffix,
+		tokenSecret:   "pw-" + base + "-" + suffix + "-token",
+		litellmSecret: "pw-" + base + "-" + suffix + "-litellm",
 	}
 	// Keep each well under the 253-char DNS label limit.
 	n.deployment = trunc(n.deployment, 63)
 	n.service = trunc(n.service, 63)
 	n.ingress = trunc(n.ingress, 253)
 	n.tokenSecret = trunc(n.tokenSecret, 253)
+	n.litellmSecret = trunc(n.litellmSecret, 253)
 	return n
 }
 
