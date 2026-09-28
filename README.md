@@ -38,29 +38,52 @@ JSON object; one Pi stdout JSONL record becomes one outbound text frame. See the
 - A **wildcard DNS** record (e.g. `*.agents.example.com`) routing to the ingress
   controller, and a **TLS certificate/Secret** covering that wildcard.
 - A reachable **LiteLLM** proxy exposing the OpenAI-compatible `/v1` API.
-
+- Nginx Ingress is enabled.
 ### Configuration
 
 The manager requires two flags (set as env in `config/manager/manager.yaml`):
 
 - `--worker-image` — the worker image built from `Dockerfile.worker`.
 - `--ingress-domain` — the wildcard base domain used to generate per-`PiWorker` hosts.
+- `--worker-image-pull-secret` (optional) — name of a same-namespace
+  `kubernetes.io/dockerconfigjson` Secret the worker Pod uses to pull the worker image.
 - `--ingress-tls-secret` (optional) — default TLS Secret when a CR omits
   `spec.ingress.tlsSecretName`.
 
-### Creating a PiWorker
 
-Create the two Secrets the workload needs (the controller never reads their values; kubelet
-projects them as files):
+### Building the two images
 
 ```sh
-# LiteLLM API key
-kubectl create secret generic litellm-credentials \
-  --from-literal=api-key=sk-litellm-...
+# Controller manager image (Dockerfile)
+make docker-build docker-push IMG=<registry>/piworker-controller:<tag>
 
-# Client bearer token (what clients present over wss://)
-kubectl create secret generic piworker-client-token \
-  --from-literal=token=$(openssl rand -hex 32)
+# Worker image (Dockerfile.worker) — bridge + Pi runtime. docker-build-worker depends on
+# build-bridge, so the linux bridge binary (bin/bridge) is built first automatically.
+make docker-build-worker docker-push-worker WORKER_IMG=<registry>/piworker-worker:<tag>
+```
+
+On an arm64 host building for an amd64 cluster, set `BRIDGE_GOARCH=amd64` for the worker build.
+
+### Creating a PiWorker
+
+The LiteLLM API key is provided **inline** in the spec; the controller copies it into a
+controller-owned Secret (deleted with the `PiWorker`) and projects that Secret into the worker
+Pod as a file — no `kubectl create secret` for it is needed. The client bearer token is
+**auto-generated** by the controller into an owned Secret and exposed in
+`.status.bearerTokenSecretRef`.
+
+If the worker image lives in a private registry, create a pull Secret of type
+`kubernetes.io/dockerconfigjson` in the namespace where the `PiWorker` will live:
+
+```sh
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.15.1/deploy/static/provider/cloud/deploy.yaml
+
+kubectl create namespace agents
+
+kubectl create secret docker-registry ghcr-pull-secret -n agents \
+  --docker-server=ghcr.io \
+  --docker-username=<user> \
+  --docker-password=$GITHUB_TOKEN
 ```
 
 Apply a `PiWorker`:
@@ -70,24 +93,31 @@ apiVersion: ubi.pi.dev/v1alpha1
 kind: PiWorker
 metadata:
   name: my-agent
+  namespace: agents
 spec:
-  model: gpt-4.1
+  model: glm-5.3-flash
   litellm:
     baseURL: http://litellm-proxy.default.svc:4000/v1
-    apiKeySecretRef: { name: litellm-credentials, key: api-key }
+    apiKey: sk-litellm-REPLACE-ME      # inline; projected into the Pod via an owned Secret
   auth:
-    bearerTokenSecretRef: { name: piworker-client-token, key: token }
     allowedOrigins: ["https://console.example.com"]
   ingress:
     className: nginx
-    tlsSecretName: wildcard-agents-tls
+#    tlsSecretName: wildcard-agents-tls
 ```
 
-Read the generated endpoint:
+The worker image and pull Secret default to the manager flags above; override them per CR with
+`spec.workerImage` / `spec.workerImagePullSecret`.
+
+Read the generated endpoint and the auto-generated bearer token:
 
 ```sh
-kubectl get piworker my-agent -o jsonpath='{.status.endpoint}'
+kubectl get piworker my-agent -n agents -o jsonpath='{.status.endpoint}'
 # wss://pw-<token>.agents.example.com/v1/rpc
+
+TOKEN=$(kubectl get secret -n agents \
+  $(kubectl get piworker my-agent -n agents -o jsonpath='{.status.bearerTokenSecretRef.name}') \
+  -o jsonpath='{.data.token}' | base64 -d)
 ```
 
 Connect with a WebSocket client that sends `Authorization: Bearer <token>`; each direction is

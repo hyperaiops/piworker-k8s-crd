@@ -6,6 +6,11 @@ ARG TARGETOS
 ARG TARGETARCH
 
 WORKDIR /workspace
+# Configure the Go module proxy. Override with --build-arg GOPROXY=... (e.g. a
+# corporate proxy, or "direct" to skip the proxy entirely). Falls back to direct
+# after the proxy so a missing/redirected module can still resolve.
+ARG GOPROXY=https://proxy.golang.org,direct
+ENV GOPROXY=${GOPROXY}
 # Copy the Go Modules manifests
 COPY go.mod go.mod
 COPY go.sum go.sum

@@ -18,6 +18,7 @@ package controller
 
 import (
 	"fmt"
+	"path"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -42,6 +43,13 @@ type Config struct {
 	// TLSSecretName, when non-empty, is the default TLS secret used for the Ingress when the
 	// CR does not specify one.
 	TLSSecretName string
+	// NFSServer, when set together with NFSShare, backs each worker Pod's /workspace with an
+	// NFS volume mounted at <NFSShare>/<PiWorker.name>. Lets the operator mount pre-existing
+	// per-workspace directories (e.g. scaffolded by an upstream frontend) without a PVC.
+	NFSServer string
+	// NFSShare is the exported NFS directory holding per-workspace subdirectories, e.g.
+	// /srv/nfs/shared. Each PiWorker mounts the <NFSShare>/<PiWorker.name> subdirectory.
+	NFSShare string
 }
 
 // desiredDeployment builds the worker Deployment for a PiWorker. Credentials are projected
@@ -59,7 +67,7 @@ func (r *PiWorkerReconciler) desiredDeployment(piworker *ubiv1alpha1.PiWorker, n
 		workerImagePullSecret = r.Config.WorkerImagePullSecret
 	}
 
-	volumes, mounts := workerVolumes(piworker, n)
+	volumes, mounts := workerVolumes(piworker, n, r.Config)
 
 	resources := piworker.Spec.Resources
 	if resources.Requests == nil {
@@ -70,7 +78,10 @@ func (r *PiWorkerReconciler) desiredDeployment(piworker *ubiv1alpha1.PiWorker, n
 	}
 
 	strategy := appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}
-	if piworker.Spec.Workspace.PersistentVolumeClaimName == "" {
+	// A durable workspace (operator-wide NFS mount or an explicit PVC) is shared state that
+	// must not race two pods writing the same directory — use Recreate so the old pod exits
+	// before the new one starts. Ephemeral emptyDir workspaces roll freely.
+	if !durableWorkspace(piworker, r.Config) {
 		strategy.Type = appsv1.RollingUpdateDeploymentStrategyType
 		// Match the API-server defaults so the desired spec equals the live one and the
 		// reconciler's merge patch is empty when there is no drift; otherwise the patch is
@@ -118,6 +129,9 @@ func (r *PiWorkerReconciler) desiredDeployment(piworker *ubiv1alpha1.PiWorker, n
 					"--token-path=/secrets/client/" + bearerTokenKey,
 					"--workspace-dir=/workspace",
 					"--home-dir=/home/pi",
+					// Persist the Pi agent session state inside the mounted workspace so it
+					// survives pod restarts and is shared with the workspace's file tree.
+					"--agent-dir=/workspace/.pi/agent",
 				},
 				Ports: []corev1.ContainerPort{{
 					Name:          bridgePortName,
@@ -235,16 +249,21 @@ func (r *PiWorkerReconciler) desiredIngress(piworker *ubiv1alpha1.PiWorker, n na
 	return ing
 }
 
-func workerVolumes(piworker *ubiv1alpha1.PiWorker, n names) ([]corev1.Volume, []corev1.VolumeMount) {
+func workerVolumes(piworker *ubiv1alpha1.PiWorker, n names, cfg Config) ([]corev1.Volume, []corev1.VolumeMount) {
+	workspaceVol, workspaceSubPath := workspaceVolume(piworker, cfg)
 	volumes := []corev1.Volume{
-		workspaceVolume(piworker),
+		workspaceVol,
 		{Name: "pi-home", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 		{Name: "tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 		litellmSecretVolume(n),
 		clientSecretVolume(piworker),
 	}
+	workspaceMount := corev1.VolumeMount{Name: "workspace", MountPath: "/workspace"}
+	if workspaceSubPath != "" {
+		workspaceMount.SubPath = workspaceSubPath
+	}
 	mounts := []corev1.VolumeMount{
-		{Name: "workspace", MountPath: "/workspace"},
+		workspaceMount,
 		{Name: "pi-home", MountPath: "/home/pi"},
 		{Name: "tmp", MountPath: "/tmp"},
 		{Name: "litellm-secret", MountPath: "/secrets/litellm", ReadOnly: true},
@@ -253,7 +272,26 @@ func workerVolumes(piworker *ubiv1alpha1.PiWorker, n names) ([]corev1.Volume, []
 	return volumes, mounts
 }
 
-func workspaceVolume(piworker *ubiv1alpha1.PiWorker) corev1.Volume {
+// workspaceVolume returns the workspace Volume and, when applicable, the subPath to mount
+// within it. NFS takes precedence (operator-wide, per-PiWorker subdirectory), then an
+// explicit PVC, then an ephemeral emptyDir.
+func workspaceVolume(piworker *ubiv1alpha1.PiWorker, cfg Config) (corev1.Volume, string) {
+	if cfg.NFSServer != "" && cfg.NFSShare != "" {
+		// Mount the per-workspace subdirectory directly. The NFS server only exports the
+		// share root, but mounting <share>/<PiWorker.name> as the volume path (rather than
+		// mounting the root and using a subPath) avoids a root-share mount that some servers
+		// deny even when the subdirectory is exported/accessible.
+		return corev1.Volume{
+			Name: "workspace",
+			VolumeSource: corev1.VolumeSource{
+				NFS: &corev1.NFSVolumeSource{
+					Server:   cfg.NFSServer,
+					Path:     path.Join(cfg.NFSShare, piworker.Name),
+					ReadOnly: false,
+				},
+			},
+		}, ""
+	}
 	if pvc := piworker.Spec.Workspace.PersistentVolumeClaimName; pvc != "" {
 		return corev1.Volume{
 			Name: "workspace",
@@ -262,9 +300,15 @@ func workspaceVolume(piworker *ubiv1alpha1.PiWorker) corev1.Volume {
 					ClaimName: pvc,
 				},
 			},
-		}
+		}, ""
 	}
-	return corev1.Volume{Name: "workspace", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}
+	return corev1.Volume{Name: "workspace", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}, ""
+}
+
+// durableWorkspace reports whether the workspace is backed by shared/persistent storage
+// (operator-wide NFS or an explicit PVC) rather than an ephemeral emptyDir.
+func durableWorkspace(piworker *ubiv1alpha1.PiWorker, cfg Config) bool {
+	return (cfg.NFSServer != "" && cfg.NFSShare != "") || piworker.Spec.Workspace.PersistentVolumeClaimName != ""
 }
 
 func litellmSecretVolume(n names) corev1.Volume {

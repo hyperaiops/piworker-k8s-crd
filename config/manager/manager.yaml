@@ -67,16 +67,22 @@ spec:
           - --worker-image-pull-secret=$(WORKER_IMAGE_PULL_SECRET)
           - --ingress-domain=$(INGRESS_DOMAIN)
           - --ingress-tls-secret=$(INGRESS_TLS_SECRET)
+          - --nfs-server=$(NFS_SERVER)
+          - --nfs-share=$(NFS_SHARE)
         env:
         - name: WORKER_IMAGE
-          value: ghcr.io/hyperaiops/piworker-worker:v0.0.2
+          value: ghcr.io/hyperaiops/piworker-worker:v0.1.0
         - name: WORKER_IMAGE_PULL_SECRET
           value: ghcr-pull-secret
         - name: INGRESS_DOMAIN
           value: agents.example.com
         - name: INGRESS_TLS_SECRET
           value: ""
-        image: ghcr.io/hyperaiops/piworker-controller:v0.0.11
+        - name: NFS_SERVER
+          value: ae2-vibe-dokku01.ubisoft.org
+        - name: NFS_SHARE
+          value: /srv/nfs/shared
+        image: ghcr.io/hyperaiops/piworker-controller:v0.1.0
         name: manager
         ports:
         - containerPort: 8081

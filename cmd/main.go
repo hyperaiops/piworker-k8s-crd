@@ -67,6 +67,8 @@ func main() {
 	var workerImagePullSecret string
 	var ingressDomain string
 	var ingressTLSSecret string
+	var nfsServer string
+	var nfsShare string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -84,6 +86,14 @@ func main() {
 	flag.StringVar(&ingressTLSSecret, "ingress-tls-secret", "",
 		"Default same-namespace TLS Secret name covering the wildcard domain, used when a PiWorker "+
 			"does not specify spec.ingress.tlsSecretName.")
+	flag.StringVar(&nfsServer, "nfs-server", "",
+		"Hostname of the NFS server backing agent workspaces, e.g. nfs.example.com. When set "+
+			"together with --nfs-share, each worker Pod mounts <nfs-share>/<PiWorker.name> at /workspace "+
+			"over NFS instead of an ephemeral emptyDir. Optional.")
+	flag.StringVar(&nfsShare, "nfs-share", "",
+		"Exported NFS directory that holds per-workspace subdirectories, e.g. /srv/nfs/shared. "+
+			"Each PiWorker mounts the <nfs-share>/<PiWorker.name> subdirectory at /workspace. Optional; "+
+			"requires --nfs-server to take effect.")
 	flag.BoolVar(&secureMetrics, "metrics-secure", true,
 		"If set, the metrics endpoint is served securely via HTTPS. Use --metrics-secure=false to use HTTP instead.")
 	flag.StringVar(&webhookCertPath, "webhook-cert-path", "", "The directory that contains the webhook certificate.")
@@ -210,6 +220,8 @@ func main() {
 			WorkerImagePullSecret: workerImagePullSecret,
 			IngressDomain:         ingressDomain,
 			TLSSecretName:         ingressTLSSecret,
+			NFSServer:             nfsServer,
+			NFSShare:              nfsShare,
 		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "piworker")
