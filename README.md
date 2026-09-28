@@ -3,6 +3,53 @@
 The **PiWorker** operator runs the [Pi coding agent](https://pi.dev) in headless RPC mode and
 exposes it behind an authenticated WebSocket endpoint reachable from outside the cluster.
 
+## Architecture
+
+```mermaid
+flowchart TB
+    subgraph cluster["Kubernetes cluster"]
+        subgraph sys["piworker-system"]
+            ctrl["Controller manager"]
+        end
+        subgraph agents["agents namespace"]
+            workload["Worker pod"]
+            bridge["Bridge (Go)"]
+            pi["Pi coding agent"]
+            litellm["LiteLLM proxy"]
+            ingress["Ingress (nginx)"]
+        end
+        webc["webcontainer (Next.js)"]
+
+        webc -- "creates PiWorker CR" --> ctrl
+        ctrl -- "reconciles" --> workload
+        workload --> bridge --> pi
+        pi -- "model traffic" --> litellm --> llm["upstream LLMs"]
+        workload -- "exposed via" --> ingress
+    end
+
+    ingress --> client["Client (browser / CLI)"]
+    workload -. "workspace + session state" .-> nfsserver["NFS server<br/>/srv/nfs/shared/&lt;PiWorker.name&gt;"]
+    webc -. "scaffolds workspace dir" .-> nfsserver
+```
+
+
+## Built with
+
+- **Go 1.26** — the controller manager and the bridge binary
+  ([controller-runtime](https://pkg.go.dev/sigs.k8s.io/controller-runtime) +
+  [Kubebuilder](https://book.kubebuilder.io/) scaffolding).
+- **Kubebuilder** — CRD generation, controller scaffolding, RBAC markers, envtest.
+- **Kustomize** — deployment manifests (`config/`), per-environment patches.
+- **Docker / BuildKit** — two images: a distroless controller (`Dockerfile`) and a
+  Node-based worker (`Dockerfile.worker`).
+- **Node.js 22 + `@earendil-works/pi-coding-agent`** — the real Pi coding agent baked
+  into the worker image, plus a baked-in LiteLLM provider extension.
+- **LiteLLM** — OpenAI-compatible proxy the agent routes model traffic through.
+- **Nginx Ingress** — per-instance public WebSocket endpoints with a wildcard TLS cert.
+- **NFS (v3)** — operator-managed per-workspace mount (`<share>/<PiWorker.name>`) so the
+  agent workspace and session state persist alongside the webcontainer frontend.
+- **envtest** — in-cluster controller behavior tests (`make test`).
+
 ## Description
 
 Each `PiWorker` custom resource makes the operator reconcile a hardened, single-replica
@@ -49,6 +96,11 @@ The manager requires two flags (set as env in `config/manager/manager.yaml`):
   `kubernetes.io/dockerconfigjson` Secret the worker Pod uses to pull the worker image.
 - `--ingress-tls-secret` (optional) — default TLS Secret when a CR omits
   `spec.ingress.tlsSecretName`.
+- `--nfs-server` / `--nfs-share` (optional) — when both are set, each worker Pod mounts
+  `<nfs-share>/<PiWorker.name>` at `/workspace` over NFS (v3) instead of an ephemeral
+  emptyDir. This aligns the agent workspace with the directory an upstream frontend
+  (e.g. webcontainer) scaffolds under the same share. The agent session state is kept
+  at `/workspace/.pi/agent` so it persists with the workspace across pod restarts.
 
 
 ### Building the two images
@@ -140,9 +192,17 @@ instance as a remote-code-execution sandbox:
 
 ### Workspace persistence
 
-By default the agent runs against an ephemeral `emptyDir` erased on pod recreation. Set
-`spec.workspace.persistentVolumeClaimName` to an existing same-namespace PVC for durable work
-(the Deployment uses a `Recreate` rollout strategy with a PVC).
+The agent workspace is one of three, chosen in this order:
+
+1. **NFS** (operator-wide, recommended with an upstream frontend) — when the manager runs
+   with `--nfs-server`/`--nfs-share`, every worker Pod mounts
+   `<nfs-share>/<PiWorker.name>` at `/workspace` over NFS. The directory must already exist
+   under the share (typically scaffolded by a frontend like webcontainer). Pi session state
+   is written to `/workspace/.pi/agent` so it persists with the workspace. The Deployment
+   uses a `Recreate` rollout strategy so two pods never write the same NFS directory at once.
+2. **PVC** — set `spec.workspace.persistentVolumeClaimName` to an existing same-namespace
+   PVC for durable work without operator-level NFS (also `Recreate` rollout).
+3. **emptyDir** (default) — ephemeral, erased on pod recreation (`RollingUpdate` rollout).
 
 
 ## Getting Started
