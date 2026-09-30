@@ -1,3 +1,52 @@
+# Optional: a STATIC NFS-backed PVC workspace.
+#
+# Unlike the operator-wide NFS path (manager flags --nfs-server/--nfs-share, which mounts
+# <nfs-share>/<PiWorker.name> automatically and needs no PV/PVC), the block below provisions
+# the storage up front as an explicit PersistentVolume + PersistentVolumeClaim and points the
+# PiWorker at it via spec.workspace.persistentVolumeClaimName. Use this when a workspace must
+# live at a fixed NFS path that is NOT named after the PiWorker, or when you want the PVC to
+# outlive / be shared across PiWorkers.
+#
+# The PV is "static" (pre-provisioned by hand, no StorageClass/binding by the controller), so
+# it carries a fixed claimRef and a capacity. The NFS server/export here match the operator's
+# --nfs-server/--nfs-share defaults (ae2-vibe-dokku01.ubisoft.org:/srv/nfs/shared); adjust
+# server:/path to your export. The PVC must be in the SAME namespace as the PiWorker (agents)
+# and must be Bound before the worker Pod starts, otherwise the Pod stays Pending. With a PVC
+# workspace the deployment strategy becomes Recreate (durable workspace).
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: my-agent-workspace-nfs
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""            # empty => static, no dynamic provisioning
+  claimRef:                        # bind this PV to the PVC below explicitly (static binding)
+    name: my-agent-workspace
+    namespace: agents
+  nfs:
+    server: ae2-vibe-dokku01.ubisoft.org
+    path: /srv/nfs/shared/my-agent  # the workspace directory on the export
+    readOnly: false
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: my-agent-workspace
+  namespace: agents
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ""            # must be empty to match the static PV above
+  resources:
+    requests:
+      storage: 10Gi
+  volumeName: my-agent-workspace-nfs  # bind to the static PV explicitly
+---
 apiVersion: ubi.pi.dev/v1alpha1
 kind: PiWorker
 metadata:
@@ -9,11 +58,18 @@ metadata:
 spec:
   # LiteLLM model name routable by the proxy.
   model: glm-5.3-flash
-  # When the manager is started with --nfs-server/--nfs-share, the controller mounts
-  # <nfs-share>/<PiWorker.name> at /workspace automatically. The name must match an
-  # existing subdirectory under the share (e.g. a workspace scaffolded by webcontainer).
-  # To use an ephemeral emptyDir instead, leave workspace unset; to mount an explicit
-  # same-namespace PVC, set workspace.persistentVolumeClaimName.
+  # Workspace backing for /workspace. Two options:
+  #   1) Operator-wide NFS (default): when the manager is started with --nfs-server/--nfs-share,
+  #      the controller mounts <nfs-share>/<PiWorker.name> at /workspace automatically. The name
+  #      must match an existing subdirectory under the share (e.g. scaffolded by webcontainer).
+  #      Leave workspace unset to use this (or an ephemeral emptyDir when the flags are absent).
+  #   2) Explicit static PVC (below): set workspace.persistentVolumeClaimName to a same-namespace
+  #      PVC you provisioned yourself — e.g. the PersistentVolume + PersistentVolumeClaim at the
+  #      top of this file, which back the workspace with a static NFS export. The PVC must be Bound
+  #      before the worker Pod starts. Use this for a workspace at a fixed NFS path not named
+  #      after the PiWorker, or a PVC shared across PiWorkers.
+  workspace:
+    persistentVolumeClaimName: my-agent-workspace
   litellm:
     # OpenAI-compatible LiteLLM endpoint.
     baseURL: https://llm.ubichat.ubisoft.org
