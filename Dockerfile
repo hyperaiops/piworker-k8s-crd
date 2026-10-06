@@ -9,7 +9,7 @@ WORKDIR /workspace
 # Configure the Go module proxy. Override with --build-arg GOPROXY=... (e.g. a
 # corporate proxy, or "direct" to skip the proxy entirely). Falls back to direct
 # after the proxy so a missing/redirected module can still resolve.
-ARG GOPROXY=https://proxy.golang.org,direct
+ARG GOPROXY=https://goproxy.cn,direct
 ENV GOPROXY=${GOPROXY}
 # Copy the Go Modules manifests
 COPY go.mod go.mod
@@ -30,7 +30,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o ma
 
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
-FROM gcr.io/distroless/static:nonroot
+FROM gcr.m.daocloud.io/distroless/static:nonroot
 WORKDIR /
 COPY --from=builder /workspace/manager .
 USER 65532:65532

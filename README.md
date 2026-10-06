@@ -132,7 +132,7 @@ kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/cont
 
 kubectl create namespace agents
 
-kubectl create secret docker-registry ghcr-pull-secret -n agents \
+kubectl create secret docker-registry pull-secret -n agents \
   --docker-server=ghcr.io \
   --docker-username=<user> \
   --docker-password=$GITHUB_TOKEN
