@@ -75,7 +75,7 @@ spec:
         - name: WORKER_IMAGE_PULL_SECRET
           value: pull-secret
         - name: INGRESS_DOMAIN
-          value: agents.vibe-conding.host
+          value: agents.vibe-coding.host
         - name: INGRESS_TLS_SECRET
           value: ""
         - name: NFS_SERVER
