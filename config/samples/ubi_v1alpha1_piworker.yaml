@@ -95,5 +95,5 @@ spec:
   # --worker-image-pull-secret defaults. Setting workerImage lets a PiWorker author run an
   # arbitrary image in the agent Pod, so the namespace must be trusted. Leave unset to use the
   # operator-configured worker image.
-  workerImage: ccr.ccs.tencentyun.com/vcaas/piworker-worker:tencent-v0.1.0
+  workerImage: ccr.ccs.tencentyun.com/vcaas/piworker-worker:v0.1.0
   workerImagePullSecret: ghcr-pull-secret
