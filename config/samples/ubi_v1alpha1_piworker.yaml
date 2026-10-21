@@ -30,7 +30,7 @@ spec:
     namespace: agents
   nfs:
     server: 10.0.0.10
-    path: /srv/nfs/shared/my-agent  # the workspace directory on the export
+    path: /mnt/nfs/my-agent  # the workspace directory on the export
     readOnly: false
 ---
 apiVersion: v1
@@ -96,4 +96,4 @@ spec:
   # arbitrary image in the agent Pod, so the namespace must be trusted. Leave unset to use the
   # operator-configured worker image.
   workerImage: ccr.ccs.tencentyun.com/vcaas/piworker-worker:v0.1.0
-  workerImagePullSecret: ghcr-pull-secret
+  workerImagePullSecret: pull-secret
