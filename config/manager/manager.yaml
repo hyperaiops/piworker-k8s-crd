@@ -81,7 +81,7 @@ spec:
         - name: NFS_SERVER
           value: 10.0.0.10
         - name: NFS_SHARE
-          value: /srv/nfs/shared
+          value: /mnt/nfs
         image: ccr.ccs.tencentyun.com/vcaas/piworker-controller:tencent-v0.1.0
         name: manager
         ports:
