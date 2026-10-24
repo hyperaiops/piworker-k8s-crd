@@ -300,7 +300,7 @@ func workspaceVolume(piworker *ubiv1alpha1.PiWorker, cfg Config) (corev1.Volume,
 					ClaimName: pvc,
 				},
 			},
-		}, ""
+		}, piworker.Spec.Workspace.SubPath
 	}
 	return corev1.Volume{Name: "workspace", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}, ""
 }

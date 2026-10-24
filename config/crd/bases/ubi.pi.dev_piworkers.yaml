@@ -197,6 +197,16 @@ spec:
                       /workspace for durable work. When omitted an emptyDir is used.
                     maxLength: 253
                     type: string
+                  subPath:
+                    description: |-
+                      subPath, when set, mounts only this subdirectory within the PVC at /workspace
+                      instead of the PVC root. The subdirectory must already exist on the backing volume;
+                      subPath does not auto-create it. Use this to share one PVC across PiWorkers, each
+                      pinned to a different subdirectory. Has no effect when persistentVolumeClaimName is
+                      unset (emptyDir workspace) or with operator-wide NFS (which bakes the per-PiWorker
+                      subdirectory into the volume path directly).
+                    maxLength: 253
+                    type: string
                 type: object
             required:
             - auth

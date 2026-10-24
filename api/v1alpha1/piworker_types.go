@@ -97,6 +97,16 @@ type WorkspaceSpec struct {
 	// +optional
 	// +kubebuilder:validation:MaxLength=253
 	PersistentVolumeClaimName string `json:"persistentVolumeClaimName,omitempty"`
+
+	// subPath, when set, mounts only this subdirectory within the PVC at /workspace
+	// instead of the PVC root. The subdirectory must already exist on the backing volume;
+	// subPath does not auto-create it. Use this to share one PVC across PiWorkers, each
+	// pinned to a different subdirectory. Has no effect when persistentVolumeClaimName is
+	// unset (emptyDir workspace) or with operator-wide NFS (which bakes the per-PiWorker
+	// subdirectory into the volume path directly).
+	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	SubPath string `json:"subPath,omitempty"`
 }
 
 // PiWorkerSpec defines the desired state of PiWorker
