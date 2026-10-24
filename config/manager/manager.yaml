@@ -73,7 +73,7 @@ spec:
           - --nfs-share=$(NFS_SHARE)
         env:
         - name: WORKER_IMAGE
-          value: ccr.ccs.tencentyun.com/vcaas/piworker-worker:v0.1.1
+          value: ccr.ccs.tencentyun.com/vcaas/piworker-worker:v0.1.2
         - name: WORKER_IMAGE_PULL_SECRET
           value: pull-secret
         - name: INGRESS_DOMAIN
@@ -84,7 +84,7 @@ spec:
           value: 10.0.0.10
         - name: NFS_SHARE
           value: /mnt/nfs
-        image: ccr.ccs.tencentyun.com/vcaas/piworker-controller:v0.1.1
+        image: ccr.ccs.tencentyun.com/vcaas/piworker-controller:v0.1.2
         name: manager
         ports:
         - containerPort: 8081

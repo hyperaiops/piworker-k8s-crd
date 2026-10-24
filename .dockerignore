@@ -13,9 +13,10 @@
 !go.mod
 !go.sum
 
-# Re-include the baked-in Pi LiteLLM provider extension (TypeScript + package.json).
+# Re-include the baked-in Pi LiteLLM provider extension and locked dependencies.
 !internal/bridge/pi-extension/litellm/index.ts
 !internal/bridge/pi-extension/litellm/package.json
+!internal/bridge/pi-extension/litellm/package-lock.json
 
 # Re-include the prebuilt Go binaries copied into the worker/controller images.
 !bin/bridge

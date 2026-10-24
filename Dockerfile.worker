@@ -8,18 +8,20 @@
 # Runtime: Node + Pi + tools. Node >= 22.19.0 is required by pi-coding-agent.
 FROM node:22-bookworm-slim
 
-# Pi (@earendil-works/pi-coding-agent) requires on PATH: git, bash, node. bash and node
-# ship in the base; git, ripgrep and ca-certificates are installed here. rg and fd are
-# auto-downloaded by Pi at runtime if missing, but ripgrep is pre-installed to avoid
-# runtime GitHub egress. ca-certificates is needed for git clone, npm and LiteLLM HTTPS.
+# Pre-install Pi's shell, git and search tools to avoid runtime GitHub downloads.
+# Debian calls fd "fdfind", which Pi recognizes. Bootstrap CA certificates before
+# switching Debian downloads to HTTPS (HTTP package downloads can fail behind proxies).
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends bash ca-certificates \
+  && apt-get install -y --no-install-recommends ca-certificates \
+  && sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends bash git ripgrep fd-find \
   && rm -rf /var/lib/apt/lists/*
 
 # Use the npmmirror.com registry; the default registry.npmjs.org is unreachable here.
 RUN npm config set registry https://registry.npmmirror.com
 
-RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.85.1
+RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@1.4.0
 
 RUN groupadd -g 10001 pi && useradd -m -d /home/pi -u 10001 -g 10001 pi
 
@@ -29,7 +31,7 @@ COPY bin/bridge /usr/local/bin/bridge
 # emptyDir mounted at /home/pi. The bridge symlinks it into the writable Pi
 # agent dir (<home>/.pi/agent/extensions/litellm) at startup.
 COPY internal/bridge/pi-extension/litellm /opt/pi-extensions/litellm
-RUN cd /opt/pi-extensions/litellm && npm install --ignore-scripts \
+RUN cd /opt/pi-extensions/litellm && npm ci --ignore-scripts \
   && chown -R pi:pi /opt/pi-extensions
 
 RUN mkdir -p /workspace /tmp && chown -R pi:pi /workspace

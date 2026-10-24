@@ -133,6 +133,14 @@ func (r *PiWorkerReconciler) desiredDeployment(piworker *ubiv1alpha1.PiWorker, n
 					// survives pod restarts and is shared with the workspace's file tree.
 					"--agent-dir=/workspace/.pi/agent",
 				},
+				// Share configuration with Pi launched manually via kubectl exec. The API
+				// key itself remains in the projected Secret file, never in the environment.
+				Env: []corev1.EnvVar{
+					{Name: "PI_CODING_AGENT_DIR", Value: "/workspace/.pi/agent"},
+					{Name: "PI_LITELLM_BASE_URL", Value: piworker.Spec.LiteLLM.BaseURL},
+					{Name: "PI_LITELLM_MODEL", Value: piworker.Spec.Model},
+					{Name: "PI_LITELLM_API_KEY_FILE", Value: "/secrets/litellm/" + litellmAPIKeyKey},
+				},
 				Ports: []corev1.ContainerPort{{
 					Name:          bridgePortName,
 					ContainerPort: bridgePort,

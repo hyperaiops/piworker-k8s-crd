@@ -114,7 +114,58 @@ make docker-build docker-push IMG=<registry>/piworker-controller:<tag>
 make docker-build-worker docker-push-worker WORKER_IMG=<registry>/piworker-worker:<tag>
 ```
 
-On an arm64 host building for an amd64 cluster, set `BRIDGE_GOARCH=amd64` for the worker build.
+On an arm64 host building for an amd64 cluster, set `PLATFORM=linux/amd64` for both image
+builds and also set `BRIDGE_GOARCH=amd64` for the worker build.
+
+### Verifying the worker runtime
+
+The worker pins Pi and its LiteLLM extension dependencies to **1.4.0**, on Node.js 22
+(Pi requires >=22.19.0). It includes `bash`, `git`, `ripgrep`, `fd-find` (Debian's
+`fdfind`, recognized by Pi), and CA certificates so search tools need no runtime download.
+Project-specific tools such as Python, compilers, or browsers are not required for RPC startup.
+
+Build and test the real Pi subprocess without network access or real model credentials:
+
+```sh
+make docker-build-worker WORKER_IMG=piworker-worker:pi-1.4.0-rpc-test
+
+docker run --rm --network=none --read-only --cap-drop=ALL \
+  --security-opt=no-new-privileges \
+  --tmpfs /tmp:rw,nosuid,nodev,mode=1777 \
+  --tmpfs /home/pi:rw,nosuid,nodev,uid=10001,gid=10001 \
+  --tmpfs /workspace:rw,nosuid,nodev,uid=10001,gid=10001 \
+  --mount "type=bind,src=$PWD/hack/test-worker-rpc.mjs,dst=/rpc-smoke.mjs,readonly" \
+  --entrypoint node piworker-worker:pi-1.4.0-rpc-test /rpc-smoke.mjs
+```
+
+The smoke test runs as the image's non-root user, loads the baked-in LiteLLM extension,
+checks model discovery and RPC with and without explicit provider/model flags, and executes
+the preinstalled tools through RPC `bash`. A loopback-only mock verifies that Pi sends the
+configured model and file-backed API key and consumes a streamed response. No real LiteLLM
+service, paid model, or Kubernetes ingress is exercised.
+
+### Running Pi directly inside a worker Pod
+
+The controller sets `PI_CODING_AGENT_DIR`, `PI_LITELLM_BASE_URL`, `PI_LITELLM_MODEL`, and
+`PI_LITELLM_API_KEY_FILE` on the worker container so `kubectl exec` shells and the bridge's
+RPC subprocess share the same configuration. API keys remain in mounted Secret files;
+`/login` is not needed for this LiteLLM provider.
+
+For an existing Pod created by an older controller, configure the current shell manually
+(replace the two placeholders with the PiWorker spec values):
+
+```sh
+export PI_CODING_AGENT_DIR=/workspace/.pi/agent
+export PI_LITELLM_BASE_URL='<spec.litellm.baseURL>'
+export PI_LITELLM_MODEL='<spec.model>'
+export PI_LITELLM_API_KEY_FILE=/secrets/litellm/api-key
+pi --provider litellm --model "$PI_LITELLM_MODEL"
+```
+
+The permanent fix requires deploying the updated **controller**, which reconciles the new
+container environment and rolls the worker Pod. Rebuilding only the worker image does not
+change an existing Pod's environment. If a PiWorker explicitly sets `spec.workerImage`,
+update that field when releasing a new worker image; it overrides the manager default.
 
 ### Creating a PiWorker
 

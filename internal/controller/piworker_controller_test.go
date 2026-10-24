@@ -149,6 +149,14 @@ var _ = Describe("PiWorker Controller", func() {
 			Expect(*csc.AllowPrivilegeEscalation).To(BeFalse())
 			Expect(csc.Capabilities.Drop).To(ContainElement(corev1.Capability("ALL")))
 
+			By("verifying manual Pi processes receive the same model and agent configuration")
+			Expect(dep.Spec.Template.Spec.Containers[0].Env).To(ContainElements(
+				corev1.EnvVar{Name: "PI_CODING_AGENT_DIR", Value: "/workspace/.pi/agent"},
+				corev1.EnvVar{Name: "PI_LITELLM_BASE_URL", Value: piworker.Spec.LiteLLM.BaseURL},
+				corev1.EnvVar{Name: "PI_LITELLM_MODEL", Value: piworker.Spec.Model},
+				corev1.EnvVar{Name: "PI_LITELLM_API_KEY_FILE", Value: "/secrets/litellm/" + litellmAPIKeyKey},
+			))
+
 			By("verifying credentials are projected as Secret volumes, not env values")
 			var hasSecretEnv bool
 			for _, e := range dep.Spec.Template.Spec.Containers[0].Env {

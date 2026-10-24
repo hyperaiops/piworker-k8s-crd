@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -168,6 +169,49 @@ func TestDesiredDeploymentHardeningAndSecretProjection(t *testing.T) {
 	// Container port name matches the service port name.
 	if c.Ports[0].Name != bridgePortName {
 		t.Fatalf("expected port name %s, got %s", bridgePortName, c.Ports[0].Name)
+	}
+}
+
+func TestDesiredDeploymentPiEnvironment(t *testing.T) {
+	for _, model := range []string{"gpt-4.1", "updated-model"} {
+		t.Run(model, func(t *testing.T) {
+			pw := newTestPiWorker("agent", "uid-1")
+			pw.Spec.Model = model
+			pw.Spec.LiteLLM.BaseURL = "http://" + model + ".example.com/v1"
+			r := &PiWorkerReconciler{Scheme: runtime.NewScheme()}
+			dep := r.desiredDeployment(pw, resourceNames(pw))
+			c := dep.Spec.Template.Spec.Containers[0]
+			want := map[string]string{
+				"PI_CODING_AGENT_DIR":     "/workspace/.pi/agent",
+				"PI_LITELLM_BASE_URL":     pw.Spec.LiteLLM.BaseURL,
+				"PI_LITELLM_MODEL":        pw.Spec.Model,
+				"PI_LITELLM_API_KEY_FILE": "/secrets/litellm/" + litellmAPIKeyKey,
+			}
+			for _, e := range c.Env {
+				if strings.Contains(e.Value, pw.Spec.LiteLLM.APIKey) || (e.ValueFrom != nil && e.ValueFrom.SecretKeyRef != nil) {
+					t.Fatal("API keys must remain in mounted Secret files, not environment variables")
+				}
+				if value, ok := want[e.Name]; ok {
+					if e.Value != value || e.ValueFrom != nil {
+						t.Errorf("%s = %q, want %q", e.Name, e.Value, value)
+					}
+					delete(want, e.Name)
+				}
+			}
+			if len(want) != 0 {
+				t.Errorf("missing Pi environment variables: %v", want)
+			}
+			for _, e := range c.EnvFrom {
+				if e.SecretRef != nil {
+					t.Fatal("Secret values must not be imported as environment variables")
+				}
+			}
+			for _, arg := range c.Args {
+				if strings.Contains(arg, pw.Spec.LiteLLM.APIKey) {
+					t.Fatal("API keys must not be passed in command-line arguments")
+				}
+			}
+		})
 	}
 }
 

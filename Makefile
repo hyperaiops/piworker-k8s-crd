@@ -2,6 +2,10 @@
 IMG ?= controller:latest
 # Worker image: the bridge + Pi runtime deployed per PiWorker.
 WORKER_IMG ?= piworker-worker:latest
+# Target platform for the container images. Defaults to the host platform (native build).
+# Set PLATFORM=linux/amd64 when building on Apple Silicon (arm64) for an amd64 cluster.
+# Example: make docker-build IMG=... PLATFORM=linux/amd64
+PLATFORM ?=
 # YEAR defines the year value used for substituting the YEAR placeholder in the boilerplate header.
 YEAR ?= $(shell date +%Y)
 
@@ -133,7 +137,7 @@ run: manifests generate fmt vet ## Run a controller from your host.
 # make docker-build IMG=<img> BASE_IMAGE=docker.io/library/golang:1.26
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
-	$(CONTAINER_TOOL) build $(if $(BASE_IMAGE),--build-arg BASE_IMAGE=$(BASE_IMAGE)) $(if $(GOPROXY),--build-arg GOPROXY=$(GOPROXY)) -t ${IMG} .
+	$(CONTAINER_TOOL) build $(if $(PLATFORM),--platform=$(PLATFORM)) $(if $(BASE_IMAGE),--build-arg BASE_IMAGE=$(BASE_IMAGE)) $(if $(GOPROXY),--build-arg GOPROXY=$(GOPROXY)) -t ${IMG} .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
@@ -141,7 +145,7 @@ docker-push: ## Push docker image with the manager.
 
 .PHONY: docker-build-worker
 docker-build-worker: build-bridge ## Build the worker image (bridge + Pi runtime).
-	$(CONTAINER_TOOL) build -t ${WORKER_IMG} -f Dockerfile.worker .
+	$(CONTAINER_TOOL) build $(if $(PLATFORM),--platform=$(PLATFORM)) -t ${WORKER_IMG} -f Dockerfile.worker .
 
 .PHONY: docker-push-worker
 docker-push-worker: ## Push the worker image.
